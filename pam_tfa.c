@@ -32,7 +32,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
+#define __STDC_FORMAT_MACROS
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -46,15 +46,16 @@
 #include <pwd.h>
 #include <syslog.h>
 #include <time.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <sys/fsuid.h>
 
 #include <curl/curl.h>
 
-#ifdef USE_SSL
 #include <openssl/rand.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
-#endif
 
 #define TFA_CONFIG "/.tfa_config"
 #define EMAIL_BUFSIZ 2048
@@ -65,6 +66,7 @@
 #include <security/pam_modules.h>
 #include <security/_pam_macros.h>
 #include <security/pam_ext.h>
+#include <security/pam_misc.h>
 
 //// global per-instance
 char emailToAddr[256], emailFromAddr[256], emailServer[256],
@@ -86,9 +88,43 @@ struct tfa_file_param_map
     {"password", emailPass, sizeof(emailPass)}
 };
 
+int converse(pam_handle_t *pamh, int nargs,
+             const struct pam_message **message,
+             struct pam_response **response)
+{
+    struct pam_conv *conv;
+    int retval = pam_get_item(pamh, PAM_CONV, (void *)&conv);
+    if( retval != PAM_SUCCESS )
+    {
+        pam_syslog(pamh, LOG_ERR, "Unable to get CONV");
+        return retval;
+    }
+    return conv->conv(nargs, message, response, conv->appdata_ptr);
+}
+
+char *request_random(pam_handle_t *pamh, int echocode, const char *prompt)
+{
+    //const struct pam_message msg = { .msg_style = echocode,
+    //                                 .msg = prompt };
+    //const struct pam_message *msgs = &msg;
+
+    //struct pam_response *resp = NULL;
+    char *resp;
+    //int retval = converse(pamh, 1, &msgs, &resp);
+    (void) pam_prompt(pamh, echocode, &resp, "%s", prompt);
+    //int retval = misc_conv(1, &msgs, &resp, NULL);
+
+    if( resp == NULL )
+    {
+        static char result = 0;
+        resp = &result;
+    }
+    
+    return resp;
+}
+
 //// Base64 routines
 
-#ifdef USE_SSL
 /**
  * @brief encodes a buffer, and places the result as a string (which must be
  * freed)
@@ -97,7 +133,7 @@ struct tfa_file_param_map
  * @param length [in] Length of the input string
  * @return String which is the base 64 encoded string.
  */
-char *base64_encode(const unsigned char *buffer, size_t length)
+char *base64_encode(const char *buffer, size_t length)
 {
     char *b64txt;
     BIO *bio, *b64;
@@ -109,14 +145,16 @@ char *base64_encode(const unsigned char *buffer, size_t length)
     bio = BIO_push(b64, bio);
     BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
     BIO_write(bio, buffer, length);
-    BIO_flush(bio);
+    (void)BIO_flush(bio);
     BIO_get_mem_ptr(bio, &bufferPtr);
+    
     b64txt = strdup((*bufferPtr).data);
-    BIO_set_close(bio, BIO_CLOSE);
+    
+    (void)BIO_set_close(bio, BIO_CLOSE);
     BIO_free_all(bio);
     return b64txt;
 }
-#endif
+
 //// Send the email
 char MailPayload[EMAIL_BUFSIZ] = {0};
 
@@ -147,7 +185,7 @@ size_t publish_callback(void *ptr, size_t size, size_t nmemb, void *userp)
     return 0;
 }
 
-int publish_email(pam_handle_t *pamh, const char *currentUser)
+int publish_email(pam_handle_t *pamh, const char *currentUser, const char *code)
 {
     struct upload_status upload_ctx;
     CURL *curl;
@@ -176,10 +214,10 @@ int publish_email(pam_handle_t *pamh, const char *currentUser)
     strcat(MailPayload, "\r\nSubject: Attempted Log-in\r\n\r\n");
     strcat(MailPayload, "Your account name '");
     strcat(MailPayload, currentUser);
-    strcat(MailPayload, "' is experiencing an authentication or account related"
-           " initialization (read: log on) attempt. If this is expected then"
-           " the provided challenge below should be entered asap (time out "
-           "is fixed to 5 minutes).\r\nCHECK: XXXXXXXXXXXXXX\r\n\r\n");
+    strcat(MailPayload, "' authorization code "
+           "(expires in 5 minutes).\r\nCHECK: ");
+    strcat(MailPayload, code);
+    strcat(MailPayload, "\r\n\r\n");
 
     upload_ctx.bytes_read = 0;
 
@@ -235,9 +273,11 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     int opt_in = 1, i;
     struct passwd *findUser;
     const char *currentUser;
-#ifdef USE_SSL
-    unsigned char randBuf[8];
-#endif
+    uint32_t randBuf;
+    char randBufAscii[16] = {0};
+    uid_t oldUID;
+    gid_t oldGID;
+    char *CHAP, *RESP;
     
     char line[275];
     
@@ -336,12 +376,18 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         return PAM_PERM_DENIED;
     }
 #endif
-    
+
+    oldUID = setfsuid(findUser->pw_uid);
+    oldGID = setfsgid(findUser->pw_gid);
+
     tfa_file = fopen(tfa_filename, "r");
     if( tfa_file == NULL )
     {
         pam_syslog(pamh, LOG_ERR, "Unable to open '%s'", tfa_filename);
         free(tfa_filename);
+
+        setfsgid(oldGID); setfsuid(oldUID);
+        
         if( !opt_in )
             return PAM_PERM_DENIED; // if we can stat but can't open for reading
         // there is some kind of hack afoot - explicit deny
@@ -370,6 +416,8 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                 pam_syslog(pamh, LOG_ERR, "Invalid format for '%s'",
                            file_params[iparam].param_name);
                 fclose(tfa_file);
+                setfsgid(oldGID); setfsuid(oldUID);
+
                 return PAM_SYSTEM_ERR;
             }
             ++iws;
@@ -379,6 +427,8 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                 pam_syslog(pamh, LOG_ERR, "Invalid format for '%s'",
                            file_params[iparam].param_name);
                 fclose(tfa_file);
+                setfsgid(oldGID); setfsuid(oldUID);
+
                 return PAM_SYSTEM_ERR;
             }
             strncpy(file_params[iparam].output_variable,
@@ -411,19 +461,46 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         pam_syslog(pamh, LOG_DEBUG, "Email username: %s", emailUser);
     }
 
-#ifdef USE_SSL
     // get the random data
-    if( !RAND_bytes(randBuf, 8) )
+    if( !RAND_bytes((unsigned char *)&randBuf, 4) )
     {
         /// okay something bad happened. this is a case of really bail
         pam_syslog(pamh, LOG_ERR, "Unable to achieve randomness for authentication. Denying");
+        setfsgid(oldGID); setfsuid(oldUID);
+
         return PAM_PERM_DENIED;
     }
-#endif
 
-    if( publish_email(pamh, currentUser) < 0 )
+    snprintf(randBufAscii, sizeof(randBufAscii), "%08x", randBuf);
+
+    CHAP = base64_encode(randBufAscii, strlen(randBufAscii));
+
+    //fputs("Sending challenge mail to configured recipient.\n", stdout);
+    
+    if( publish_email(pamh, currentUser, CHAP) < 0 )
     {
         pam_syslog(pamh, LOG_ERR, "Unable to send email - denying!!");
+        free(CHAP);
+        setfsgid(oldGID); setfsuid(oldUID);
+
+        return PAM_PERM_DENIED;
+    }
+
+    if(debug) pam_syslog(pamh, LOG_DEBUG, "Sent email... awaiting response");
+    
+    //
+    RESP = request_random(pamh, PAM_PROMPT_ECHO_ON, "Challenge:");
+    
+    if(debug) pam_syslog(pamh, LOG_DEBUG, "Response '%s' received, comparing", RESP);
+    
+    i = strcmp(RESP, CHAP);
+    free(CHAP);
+    free(RESP);
+    setfsgid(oldGID); setfsuid(oldUID);
+
+    if( i )
+    {
+        //fputs("Failed - try again.", stdout);
         return PAM_PERM_DENIED;
     }
     
@@ -434,4 +511,10 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                                    int argc, const char **argv)
 {
     return pam_sm_acct_mgmt(pamh, flags, argc, argv);
+}
+
+PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
+                              const char *argv[])
+{
+    return (PAM_SUCCESS);
 }
