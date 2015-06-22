@@ -1,0 +1,7 @@
+email=myAuthPlace@foo.com
+from=myAuthPlace@foo.com
+server=mail.foo.com
+port=587
+username=myUsername
+password=myPassword
+fail=deny

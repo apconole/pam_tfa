@@ -25,14 +25,33 @@ The Authentication Part
 
 Authentication is done on a per-user basis. It is either opt-in OR system
 mandated. In either case, the two-factor information is stored in a 600 mask
-file "~/.tfa_config" and consists of the initial random seed for the key
-schedule, and the smtp email by which the user will be contacted.
+file "~/.tfa_config" and consists of the smtp email by which the user will be
+contacted.
 
-ex:
+example config
 
-> seed=RandomLettersAndNumbers
-
+This is the destination email (ex: i use my cell number @vtext.com for a text
+message)
 > email=someEmail@foo.com
+
+This is the 'from' address. it could be the same as 'email' above
+> from=myProviderEmail@target.com
+
+This sets the server address
+> server=foo.com
+
+This is the server port. Common ports are 25, 2525, and 587 - see your mail
+provider details. NOTE: for good reason, we ONLY do TLS mail
+> port=587
+
+Your mail username
+> username=myuser
+
+Your mail password
+> password=pass
+
+Fail option (deny means block if we fail to send, pass means allow anyway)
+> fail=deny
 
 Configuring
 ===========

@@ -40,8 +40,15 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/param.h>
 #include <pwd.h>
 #include <syslog.h>
+
+#include <curl/curl.h>
+#include <openssl/rand.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/buffer.h>
 
 #define TFA_CONFIG "/.tfa_config"
 
@@ -53,14 +60,64 @@
 #include <security/_pam_macros.h>
 #include <security/pam_ext.h>
 
+//// Base64 routines
+
+/**
+ * @brief encodes a buffer, and places the result as a string (which must be
+ * freed)
+ *
+ * @param buffer [in] Input string to encode
+ * @param length [in] Length of the input string
+ * @return String which is the base 64 encoded string.
+ */
+char *base64_encode(const unsigned char *buffer, size_t length)
+{
+    char *b64txt;
+    BIO *bio, *b64;
+    BUF_MEM *bufferPtr;
+
+    b64 = BIO_new(BIO_f_base64());
+    bio = BIO_new(BIO_s_mem());
+
+    bio = BIO_push(b64, bio);
+    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+    BIO_write(bio, buffer, length);
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bufferPtr);
+    b64txt = strdup((*bufferPtr).data);
+    BIO_set_close(bio, BIO_CLOSE);
+    BIO_free_all(bio);
+    return b64txt;
+}
+
 //// the following is the main entrypoint
 
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                                 int argc, const char **argv)
 {
+    char emailToAddr[256], emailFromAddr[256], emailServer[256],
+        emailPort[256], emailUser[256], emailPass[256];
+
+    struct tfa_file_param_map
+    {
+        const char *param_name;
+        char *output_variable;
+        size_t length_of_output;            
+    } file_params[] = {
+        {"email", emailToAddr, sizeof(emailToAddr)},
+        {"from", emailFromAddr, sizeof(emailFromAddr)},
+        {"server", emailServer, sizeof(emailServer)},
+        {"port", emailPort, sizeof(emailPort)},
+        {"username", emailUser, sizeof(emailUser)},
+        {"password", emailPass, sizeof(emailPass)}
+    };
     int debug = 0, opt_in = 1, i;
     struct passwd *findUser;
     const char *currentUser;
+    unsigned char randBuf[8];
+
+    char line[275];
+    
     FILE *tfa_file = NULL;
     char *tfa_filename = "";
     struct stat tfa_stat;
@@ -165,11 +222,51 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
 
     if( debug ) pam_syslog(pamh, LOG_DEBUG, "Opened '%s' for reading.", tfa_filename);
 
-    // get the seed
-    // and the email
-    
-    
+    while(fgets(line, sizeof(line), tfa_file) != NULL)
+    {
+        int iws = 0, iparam;
+        while(iws < sizeof(line) && (line[iws] == ' ' || line[iws] == '\r' || line[iws] == '\t')) ++iws;
+        if( iws == sizeof(line) ) continue;
+        if ( line[iws] == '#' || line[iws] == '\n' ) continue;
+
+        for(iparam = 0; iparam < sizeof(file_params) / sizeof(file_params[0]); ++iparam)
+        {
+            if( strcmp(file_params[iparam].param_name, line+iws) ) continue;
+            // skip more ws until =
+            iws += strlen(file_params[iparam].param_name);
+            while(line[iws] == ' ' || line[iws] == '\t') ++iws;
+            if(iws == sizeof(line) || line[iws] != '=')
+            {
+                pam_syslog(pamh, LOG_ERR, "Invalid format for '%s'",
+                           file_params[iparam].param_name);
+                fclose(tfa_file);
+                return PAM_SYSTEM_ERR;
+            }
+            ++iws;
+            while(line[iws] == ' ' || line[iws] == '\t') ++iws;
+            if(iws == sizeof(line))
+            {
+                pam_syslog(pamh, LOG_ERR, "Invalid format for '%s'",
+                           file_params[iparam].param_name);
+                fclose(tfa_file);
+                return PAM_SYSTEM_ERR;
+            }
+            strncpy(file_params[iparam].output_variable,
+                    line+iws, MIN(file_params[iparam].length_of_output,
+                                  sizeof(line)-iws));
+            file_params[iparam].output_variable[file_params[iparam].length_of_output-1] = 0;
+        }
+    }
     fclose(tfa_file); // later
+    
+    // get the random data
+    if( !RAND_bytes(randBuf, 8) )
+    {
+        /// okay something bad happened. this is a case of really bail
+        pam_syslog(pamh, LOG_ERR, "Unable to achieve randomness for authentication. Denying");
+        return PAM_PERM_DENIED;
+    }
+    
     return PAM_SUCCESS;
 }
 

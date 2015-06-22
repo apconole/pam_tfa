@@ -1,0 +1,14 @@
+# editor generated
+*~
+
+# GNU Global
+GPATH
+GRTAGS
+GSYMS
+GTAGS
+
+# generated from build
+*.o
+*.so
+dlopen
+
