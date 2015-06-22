@@ -12,8 +12,13 @@ In order to work with the SSH Daemon, there are two considerations:
 2. Systems where users authenticate with keys.
 
 The way I've chosen to handle this is by treating the 'challenge-response' phase
-as an account management function. IE: By successfully passing the 'auth' stack,
-you prove you know the authentication token.
+as an account OR auth management function. IE: By successfully passing the
+'auth' stack, you prove you know the authentication token and we can either stay
+in 'auth' land to do the challenge response or use 'account' as a means by which
+we say "you can be on this system."
+
+This also lets us get around '2' above - according to the OpenSSH manual, pubkey
+authentication bypasses the 'auth' stack in pam, but ONLY the 'auth' stack.
 
 The Authentication Part
 =======================
@@ -24,7 +29,9 @@ file "~/.tfa_config" and consists of the initial random seed for the key
 schedule, and the smtp email by which the user will be contacted.
 
 ex:
+
 > seed=RandomLettersAndNumbers
+
 > email=someEmail@foo.com
 
 Configuring
@@ -34,6 +41,6 @@ To use pam_tfa, set up either an account stack or auth stack as follows:
 
 *{accout/auth} required pam_tfa.so*
 
-Add the *debug* keyword for additional logs in your AUTHPRIV logs, and add noopt
+Add the _debug_ keyword for additional logs in your AUTHPRIV logs, and add _noopt_
 to disallow users from opting in (ie: users MUST have a valid $HOME/.tfa_config
 file).
