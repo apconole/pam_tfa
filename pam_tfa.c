@@ -38,7 +38,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
+#if USE_STAT
 #include <sys/stat.h>
+#endif
 #include <sys/types.h>
 #include <sys/param.h>
 #include <pwd.h>
@@ -128,7 +130,9 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     
     FILE *tfa_file = NULL;
     char *tfa_filename = "";
+#if USE_STAT
     struct stat tfa_stat;
+#endif
     
     for( i = 0; i < argc; ++i ){
         if( strcmp("debug", argv[i]) == 0 )
@@ -192,8 +196,9 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     
     endpwent(); // ensure we clean up
 
-    /// 
-    if(0 != stat(tfa_filename, &tfa_stat) )
+    ///
+#if USE_STAT
+    if(0 != lstat(tfa_filename, &tfa_stat) )
     {
         if( opt_in )
         {
@@ -217,9 +222,10 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         // explicit denial here
         return PAM_PERM_DENIED;
     }
+#endif
     
     tfa_file = fopen(tfa_filename, "r");
-    if( tfa_file == NULL )
+    if( tfa_file == NULL && !opt_in )
     {
         pam_syslog(pamh, LOG_ERR, "Unable to open '%s'", tfa_filename);
         free(tfa_filename);

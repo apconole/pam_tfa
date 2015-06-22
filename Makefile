@@ -1,13 +1,16 @@
 CC=gcc
-CFLAGS=-Wall -Werror -g
-SHARED_FLAGS=-fPIC -shared -rdynamic
-LIBRARIES= 
+LD=ld
+LDFLAGS=-x --shared
+CFLAGS=-Wall -Werror -g -fPIC
+SHARED_FLAGS=-shared -rdynamic
+LIBRARIES= --whole-archive -lcurl --no-whole-archive
 
 all: pam_tfa.so dlopen
 	@echo All Built
 
 pam_tfa.so: pam_tfa.c
-	$(CC) $(CFLAGS) $(SHARED_FLAGS) -o $@ $< $(LIBRARIES)
+	$(CC) $(CFLAGS) $(SHARED_FLAGS) -c -o pam_tfa.o $< 
+	$(LD) $(LIBRARIES) $(LDFLAGS) -o $@ pam_tfa.o
 
 dlopen: dlopen.c
 	$(CC) $(CFLAGS) $(SHARED_FLAGS) -o $@ $< -ldl

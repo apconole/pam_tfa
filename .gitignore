@@ -11,4 +11,4 @@ GTAGS
 *.o
 *.so
 dlopen
-
+core

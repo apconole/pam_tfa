@@ -2,11 +2,6 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-void pam_syslog (const void *pamh, int priority, const char *fmt, ...)
-{
-    return;
-}
-
 int main(int argc, char *argv[])
 {
     void *lib;
