@@ -45,10 +45,9 @@
 #include <sys/param.h>
 #include <pwd.h>
 #include <syslog.h>
+#include <time.h>
 
-#ifdef USE_CURL
 #include <curl/curl.h>
-#endif
 
 #ifdef USE_SSL
 #include <openssl/rand.h>
@@ -58,7 +57,7 @@
 #endif
 
 #define TFA_CONFIG "/.tfa_config"
-
+#define EMAIL_BUFSIZ 2048
 #define PAM_SM_AUTH
 #define PAM_SM_ACCOUNT
 #define MODULE_NAME "pam_tfa"
@@ -66,6 +65,26 @@
 #include <security/pam_modules.h>
 #include <security/_pam_macros.h>
 #include <security/pam_ext.h>
+
+//// global per-instance
+char emailToAddr[256], emailFromAddr[256], emailServer[256],
+    emailPort[256], emailUser[256], emailPass[256];
+
+int debug = 0;
+
+struct tfa_file_param_map
+{
+    const char *param_name;
+    char *output_variable;
+    size_t length_of_output;            
+} file_params[] = {
+    {"email", emailToAddr, sizeof(emailToAddr)},
+    {"from", emailFromAddr, sizeof(emailFromAddr)},
+    {"server", emailServer, sizeof(emailServer)},
+    {"port", emailPort, sizeof(emailPort)},
+    {"username", emailUser, sizeof(emailUser)},
+    {"password", emailPass, sizeof(emailPass)}
+};
 
 //// Base64 routines
 
@@ -98,28 +117,122 @@ char *base64_encode(const unsigned char *buffer, size_t length)
     return b64txt;
 }
 #endif
+//// Send the email
+char MailPayload[EMAIL_BUFSIZ] = {0};
+
+struct upload_status
+{
+    size_t bytes_read;
+};
+
+size_t publish_callback(void *ptr, size_t size, size_t nmemb, void *userp)
+{
+    struct upload_status *upload_ctx = (struct upload_status *)userp;
+    const char *data;
+    
+    if((size == 0) || (nmemb == 0) || ((size*nmemb) < 1)) {
+        return 0;
+    }
+    
+    data = &MailPayload[upload_ctx->bytes_read];
+    
+    if(data) {
+        size_t len = MIN(strlen(data), size);
+        memcpy(ptr, data, len);
+        upload_ctx->bytes_read += len;
+        
+        return len;
+    }
+    
+    return 0;
+}
+
+int publish_email(pam_handle_t *pamh, const char *currentUser)
+{
+    struct upload_status upload_ctx;
+    CURL *curl;
+    CURLcode res = CURLE_OK;
+    struct curl_slist *recipients = NULL;
+    char emailServerURL[290] = {0};
+    struct tm curTm;
+    time_t start = time(0);
+
+    if( !strlen(emailToAddr) || !strlen(emailFromAddr) ||
+        !strlen(emailServer) || !strlen(emailPort) ||
+        !strlen(emailUser)   || !strlen(emailPass) )
+    {
+        pam_syslog(pamh, LOG_ERR, "Failed for missing tfa_config element.");
+        return -1;
+    }
+
+    gmtime_r(&start, &curTm);
+
+    strcpy(MailPayload, "Date: ");
+    strftime(MailPayload+strlen(MailPayload), 32, "%A, %d-%b-%y %H:%M:%S", &curTm);
+    strcat(MailPayload, "\r\nTo: ");
+    strcat(MailPayload, emailToAddr);
+    strcat(MailPayload, "\r\nFrom: ");
+    strcat(MailPayload, emailFromAddr);
+    strcat(MailPayload, "\r\nSubject: Attempted Log-in\r\n\r\n");
+    strcat(MailPayload, "Your account name '");
+    strcat(MailPayload, currentUser);
+    strcat(MailPayload, "' is experiencing an authentication or account related"
+           " initialization (read: log on) attempt. If this is expected then"
+           " the provided challenge below should be entered asap (time out "
+           "is fixed to 5 minutes).\r\nCHECK: XXXXXXXXXXXXXX\r\n\r\n");
+
+    upload_ctx.bytes_read = 0;
+
+    curl = curl_easy_init();
+    if(!curl)
+    {
+        pam_syslog(pamh, LOG_ERR, "Unable to allocate 'curl' object");
+        return -2;
+    }
+    strcpy(emailServerURL, "smtp://");
+    strcat(emailServerURL, emailServer);
+    strcat(emailServerURL, ":");
+    strcat(emailServerURL, emailPort);
+
+    if(debug) pam_syslog(pamh, LOG_DEBUG, "cURL SMTP: [%s]", emailServerURL);
+
+    /* This is the URL for your mailserver */ 
+    curl_easy_setopt(curl, CURLOPT_URL, emailServerURL);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, emailFromAddr);
+
+    curl_easy_setopt(curl, CURLOPT_USERNAME, emailUser);
+    curl_easy_setopt(curl, CURLOPT_PASSWORD, emailPass);
+    
+    recipients = curl_slist_append(recipients, emailToAddr);
+    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+    
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, publish_callback);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &upload_ctx);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+
+    curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+
+    res = curl_easy_perform(curl);
+
+    curl_slist_free_all(recipients);
+    curl_easy_cleanup(curl);
+    
+    if( res != CURLE_OK )
+    {
+        pam_syslog(pamh, LOG_ERR, "Unsuccessful transfer of mail: %s",
+                   curl_easy_strerror(res));
+        return -3;
+    }
+    
+    return 0;
+}
+
 //// the following is the main entrypoint
 
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                                 int argc, const char **argv)
 {
-    char emailToAddr[256], emailFromAddr[256], emailServer[256],
-        emailPort[256], emailUser[256], emailPass[256];
-
-    struct tfa_file_param_map
-    {
-        const char *param_name;
-        char *output_variable;
-        size_t length_of_output;            
-    } file_params[] = {
-        {"email", emailToAddr, sizeof(emailToAddr)},
-        {"from", emailFromAddr, sizeof(emailFromAddr)},
-        {"server", emailServer, sizeof(emailServer)},
-        {"port", emailPort, sizeof(emailPort)},
-        {"username", emailUser, sizeof(emailUser)},
-        {"password", emailPass, sizeof(emailPass)}
-    };
-    int debug = 0, opt_in = 1, i;
+    int opt_in = 1, i;
     struct passwd *findUser;
     const char *currentUser;
 #ifdef USE_SSL
@@ -225,12 +338,14 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
 #endif
     
     tfa_file = fopen(tfa_filename, "r");
-    if( tfa_file == NULL && !opt_in )
+    if( tfa_file == NULL )
     {
         pam_syslog(pamh, LOG_ERR, "Unable to open '%s'", tfa_filename);
         free(tfa_filename);
-        return PAM_PERM_DENIED; // if we can stat but can't open for reading
+        if( !opt_in )
+            return PAM_PERM_DENIED; // if we can stat but can't open for reading
         // there is some kind of hack afoot - explicit deny
+        return PAM_SUCCESS;
     }
 
     if( debug ) pam_syslog(pamh, LOG_DEBUG, "Opened '%s' for reading.", tfa_filename);
@@ -268,8 +383,16 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
             }
             strncpy(file_params[iparam].output_variable,
                     line+iws, MIN(file_params[iparam].length_of_output,
-                                  sizeof(line)-iws));
+                                  sizeof(line)-(iws)));
             file_params[iparam].output_variable[file_params[iparam].length_of_output-1] = 0;
+            
+            iws = 0;
+            while( file_params[iparam].output_variable[iws] != ' ' &&
+                   file_params[iparam].output_variable[iws] != '\t' &&
+                   file_params[iparam].output_variable[iws] != '\r' &&
+                   file_params[iparam].output_variable[iws] != '\n' ) iws++;
+            file_params[iparam].output_variable[iws] = 0; // nuke any
+                                                          // trailing whitespace
         }
 
         if(!found)
@@ -287,7 +410,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         pam_syslog(pamh, LOG_DEBUG, "Email port: %s", emailPort);
         pam_syslog(pamh, LOG_DEBUG, "Email username: %s", emailUser);
     }
-    
+
 #ifdef USE_SSL
     // get the random data
     if( !RAND_bytes(randBuf, 8) )
@@ -297,6 +420,12 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         return PAM_PERM_DENIED;
     }
 #endif
+
+    if( publish_email(pamh, currentUser) < 0 )
+    {
+        pam_syslog(pamh, LOG_ERR, "Unable to send email - denying!!");
+        return PAM_PERM_DENIED;
+    }
     
     return PAM_SUCCESS;
 }
