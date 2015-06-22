@@ -5,7 +5,7 @@
 int main(int argc, char *argv[])
 {
     void *lib;
-    if( argc <= 1 )
+    if( argc == 1 )
     {
         printf("%s: %s filename\n", argv[0], argv[0]);
         return 1;
