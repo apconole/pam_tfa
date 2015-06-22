@@ -44,11 +44,16 @@
 #include <pwd.h>
 #include <syslog.h>
 
+#ifdef USE_CURL
 #include <curl/curl.h>
+#endif
+
+#ifdef USE_SSL
 #include <openssl/rand.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
+#endif
 
 #define TFA_CONFIG "/.tfa_config"
 
@@ -62,6 +67,7 @@
 
 //// Base64 routines
 
+#ifdef USE_SSL
 /**
  * @brief encodes a buffer, and places the result as a string (which must be
  * freed)
@@ -89,7 +95,7 @@ char *base64_encode(const unsigned char *buffer, size_t length)
     BIO_free_all(bio);
     return b64txt;
 }
-
+#endif
 //// the following is the main entrypoint
 
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
@@ -114,8 +120,10 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     int debug = 0, opt_in = 1, i;
     struct passwd *findUser;
     const char *currentUser;
+#ifdef USE_SSL
     unsigned char randBuf[8];
-
+#endif
+    
     char line[275];
     
     FILE *tfa_file = NULL;
@@ -218,20 +226,21 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         return PAM_PERM_DENIED; // if we can stat but can't open for reading
         // there is some kind of hack afoot - explicit deny
     }
-    free(tfa_filename);
 
     if( debug ) pam_syslog(pamh, LOG_DEBUG, "Opened '%s' for reading.", tfa_filename);
+    free(tfa_filename);
 
     while(fgets(line, sizeof(line), tfa_file) != NULL)
     {
-        int iws = 0, iparam;
+        int iws = 0, iparam, found=0;;
         while(iws < sizeof(line) && (line[iws] == ' ' || line[iws] == '\r' || line[iws] == '\t')) ++iws;
         if( iws == sizeof(line) ) continue;
         if ( line[iws] == '#' || line[iws] == '\n' ) continue;
 
         for(iparam = 0; iparam < sizeof(file_params) / sizeof(file_params[0]); ++iparam)
         {
-            if( strcmp(file_params[iparam].param_name, line+iws) ) continue;
+            if( strncmp(file_params[iparam].param_name, line+iws, strlen(file_params[iparam].param_name)) ) continue;
+            found = 1;
             // skip more ws until =
             iws += strlen(file_params[iparam].param_name);
             while(line[iws] == ' ' || line[iws] == '\t') ++iws;
@@ -256,9 +265,24 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                                   sizeof(line)-iws));
             file_params[iparam].output_variable[file_params[iparam].length_of_output-1] = 0;
         }
+
+        if(!found)
+        {
+            pam_syslog(pamh, LOG_WARNING, "Unknown element '%s' is being ignored.", line+iws);
+        }
     }
     fclose(tfa_file); // later
+
+    if( debug )
+    {
+        pam_syslog(pamh, LOG_DEBUG, "Email to: %s", emailToAddr);
+        pam_syslog(pamh, LOG_DEBUG, "Email from: %s", emailFromAddr);
+        pam_syslog(pamh, LOG_DEBUG, "Email server: %s", emailServer);
+        pam_syslog(pamh, LOG_DEBUG, "Email port: %s", emailPort);
+        pam_syslog(pamh, LOG_DEBUG, "Email username: %s", emailUser);
+    }
     
+#ifdef USE_SSL
     // get the random data
     if( !RAND_bytes(randBuf, 8) )
     {
@@ -266,6 +290,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         pam_syslog(pamh, LOG_ERR, "Unable to achieve randomness for authentication. Denying");
         return PAM_PERM_DENIED;
     }
+#endif
     
     return PAM_SUCCESS;
 }

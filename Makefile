@@ -1,7 +1,7 @@
 CC=gcc
 CFLAGS=-Wall -Werror -g
 SHARED_FLAGS=-fPIC -shared -rdynamic
-LIBRARIES=-lssl -lcurl
+LIBRARIES= 
 
 all: pam_tfa.so dlopen
 	@echo All Built

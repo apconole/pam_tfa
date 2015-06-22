@@ -16,11 +16,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    lib = dlopen(argv[1], RTLD_NOW);
+    lib = dlopen(argv[1], RTLD_NOW | RTLD_GLOBAL);
     if(lib == NULL)
     {
         printf("unable to open: %s!\n", dlerror());
         return 1;
     }
+    printf("Loaded successfully...\n");
+
+    dlclose(lib);
+    
     return 0;
 }
