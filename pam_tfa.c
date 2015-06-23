@@ -474,7 +474,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     snprintf(randBufAscii, sizeof(randBufAscii), "%08x", randBuf);
 
     CHAP = base64_encode(randBufAscii, strlen(randBufAscii));
-
+    *(CHAP+8) = 0;
     //fputs("Sending challenge mail to configured recipient.\n", stdout);
     
     if( publish_email(pamh, currentUser, CHAP) < 0 )
@@ -489,9 +489,9 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     if(debug) pam_syslog(pamh, LOG_DEBUG, "Sent email... awaiting response");
     
     //
-    RESP = request_random(pamh, PAM_PROMPT_ECHO_ON, "Challenge:");
+    RESP = request_random(pamh, PAM_PROMPT_ECHO_ON, "Challenge: ");
     
-    if(debug) pam_syslog(pamh, LOG_DEBUG, "Response '%s' received, comparing", RESP);
+    if(debug) pam_syslog(pamh, LOG_DEBUG, "Response '%s' received, comparing with '%s'", RESP, CHAP);
     
     i = strcmp(RESP, CHAP);
     free(CHAP);

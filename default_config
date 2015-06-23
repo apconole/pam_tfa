@@ -1,7 +1,26 @@
-email=myAuthPlace@foo.com
-from=myAuthPlace@foo.com
-server=mail.foo.com
-port=587
-username=myUsername
-password=myPassword
-fail=deny
+###########################################################################
+## Example Two-factor PAM Configuration
+
+# The following is a sample email address. My recommendation is to use an SMTP 
+# to SMS gateway. For verizon, this happens to be cell-number@vtext.com
+# UNDER NO CIRCUMSTANCES make this an email address that is only readable after
+# logging in (duh!)
+email    = myAuthPlace@foo.com
+
+# Set this to your source address.
+from     = myAuthPlace@foo.com
+
+# Set this to your server.
+server   = mail.foo.com
+
+# This is either going to be 25, 485, and 587
+port     = 587
+
+# username (obvious)
+username = myUsername
+
+# password (again, duh)
+password = myPassword
+
+# The 'fail to send' policy. Currently, this isn't implemented.
+fail     = deny

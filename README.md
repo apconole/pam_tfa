@@ -58,8 +58,12 @@ Configuring
 
 To use pam_tfa, set up either an account stack or auth stack as follows:
 
+* After the pam_permit.so line, add the following.
+
 *{accout/auth} required pam_tfa.so*
 
 Add the _debug_ keyword for additional logs in your AUTHPRIV logs, and add _noopt_
 to disallow users from opting in (ie: users MUST have a valid $HOME/.tfa_config
 file).
+
+Additionally, to use SSH as well, you'll need to edit the SSHD config and set /ChallengeResponseAuthentication/ flag to yes.
