@@ -215,7 +215,7 @@ int publish_email(pam_handle_t *pamh, const char *currentUser, const char *code)
     strcat(MailPayload, "Your account name '");
     strcat(MailPayload, currentUser);
     strcat(MailPayload, "' authorization code "
-           "(expires in 5 minutes).\r\nCHECK: ");
+           "\r\nCHECK: ");
     strcat(MailPayload, code);
     strcat(MailPayload, "\r\n\r\n");
 
