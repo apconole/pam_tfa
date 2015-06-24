@@ -1,9 +1,9 @@
-CC=gcc
-LD=ld
-LDFLAGS=-x --shared
-CFLAGS=-Wall -Werror -g 
-SHARED_FLAGS=-fPIC -shared -rdynamic
-LIBRARIES= --whole-archive -lcurl --no-whole-archive -lpam
+CC ?= gcc
+LD = ld
+LDFLAGS = -x --shared
+CFLAGS = -Wall -Werror -g 
+SHARED_FLAGS = -fPIC
+LIBRARIES = --whole-archive -lcurl --no-whole-archive -lpam
 
 all: pam_tfa.so dlopen
 	@echo All Built
