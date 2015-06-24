@@ -1,4 +1,4 @@
-Two Factor PAM Account library
+#Two Factor PAM Account library
 ==============================
 
 The Two Factor PAM Account library aims to provide a simple mechanism by which
