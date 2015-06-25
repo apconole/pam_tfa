@@ -24,7 +24,7 @@ AC_SUBST([regular_CFLAGS])
 AC_CHECK_HEADERS([curl/curl.h openssl/rand.h openssl/bio.h openssl/evp.h openssl/buffer.h])
 AC_CHECK_FUNCS([gmtime_r strcat snprintf curl_easy_init curl_easy_setopt curl_slist_append BIO_new BIO_push BIO_set_flags BIO_write BIO_flush BIO_get_mem_ptr BIO_set_close BIO_free_all curl_easy_perform curl_easy_cleanup pam_syslog pam_prompt setpwent getpwent endpwent setfsuid setfsgid RAND_bytes ])
 
-PKG_CHECK_MODULES([libcurl], [libcurl >= 7.35.0])
+PKG_CHECK_MODULES([libcurl], [libcurl >= 7.22.0])
 PKG_CHECK_MODULES([libssl], [libssl >= 1.0.1f])
 
 AC_CHECK_HEADERS([security/pam_modules.h], [have_pamheader="yes"])
