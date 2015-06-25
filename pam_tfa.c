@@ -66,6 +66,7 @@
 #include <security/pam_ext.h>
 #include <security/pam_misc.h>
 
+
 //// global per-instance
 char emailToAddr[256], emailFromAddr[256], emailServer[256],
     emailPort[256], emailUser[256], emailPass[256];
@@ -86,9 +87,10 @@ struct tfa_file_param_map
     {"password", emailPass, sizeof(emailPass)}
 };
 
-int converse(pam_handle_t *pamh, int nargs,
-             const struct pam_message **message,
-             struct pam_response **response)
+#if 0
+static int converse(pam_handle_t *pamh, int nargs,
+                    const struct pam_message **message,
+                    struct pam_response **response)
 {
     struct pam_conv *conv;
     int retval = pam_get_item(pamh, PAM_CONV, (void *)&conv);
@@ -99,8 +101,9 @@ int converse(pam_handle_t *pamh, int nargs,
     }
     return conv->conv(nargs, message, response, conv->appdata_ptr);
 }
+#endif
 
-char *request_random(pam_handle_t *pamh, int echocode, const char *prompt)
+static char *request_random(pam_handle_t *pamh, int echocode, const char *prompt)
 {
     //const struct pam_message msg = { .msg_style = echocode,
     //                                 .msg = prompt };
@@ -131,7 +134,7 @@ char *request_random(pam_handle_t *pamh, int echocode, const char *prompt)
  * @param length [in] Length of the input string
  * @return String which is the base 64 encoded string.
  */
-char *base64_encode(const char *buffer, size_t length)
+static char *base64_encode(const char *buffer, size_t length)
 {
     char *b64txt;
     BIO *bio, *b64;
@@ -161,7 +164,7 @@ struct upload_status
     size_t bytes_read;
 };
 
-size_t publish_callback(void *ptr, size_t size, size_t nmemb, void *userp)
+static size_t publish_callback(void *ptr, size_t size, size_t nmemb, void *userp)
 {
     struct upload_status *upload_ctx = (struct upload_status *)userp;
     const char *data;
@@ -183,7 +186,7 @@ size_t publish_callback(void *ptr, size_t size, size_t nmemb, void *userp)
     return 0;
 }
 
-int publish_email(pam_handle_t *pamh, const char *currentUser, const char *code)
+static int publish_email(pam_handle_t *pamh, const char *currentUser, const char *code)
 {
     struct upload_status upload_ctx;
     CURL *curl;
@@ -204,7 +207,7 @@ int publish_email(pam_handle_t *pamh, const char *currentUser, const char *code)
     gmtime_r(&start, &curTm);
 
     strcpy(MailPayload, "Date: ");
-    strftime(MailPayload+strlen(MailPayload), 32, "%A, %d-%b-%y %H:%M:%S", &curTm);
+    strftime(MailPayload+strlen(MailPayload), 32, "%A, %d-%b-%Y %H:%M:%S", &curTm);
     strcat(MailPayload, "\r\nTo: ");
     strcat(MailPayload, emailToAddr);
     strcat(MailPayload, "\r\nFrom: ");
