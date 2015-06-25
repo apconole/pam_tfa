@@ -69,7 +69,7 @@
 
 //// global per-instance
 char emailToAddr[256], emailFromAddr[256], emailServer[256],
-    emailPort[256], emailUser[256], emailPass[256];
+    emailPort[256], emailUser[256], emailPass[256], failPolicy[256];
 
 int debug = 0;
 
@@ -84,7 +84,8 @@ struct tfa_file_param_map
     {"server", emailServer, sizeof(emailServer)},
     {"port", emailPort, sizeof(emailPort)},
     {"username", emailUser, sizeof(emailUser)},
-    {"password", emailPass, sizeof(emailPass)}
+    {"password", emailPass, sizeof(emailPass)},
+    {"fail", failPolicy, sizeof(failPolicy)}
 };
 
 #if 0
@@ -476,10 +477,13 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     
     if( publish_email(pamh, currentUser, CHAP) < 0 )
     {
-        pam_syslog(pamh, LOG_ERR, "Unable to send email - denying!!");
+        pam_syslog(pamh, LOG_ERR, "Unable to send email!!");
         free(CHAP);
         setfsgid(oldGID); setfsuid(oldUID);
 
+        if( !strcmp(failPolicy, "pass") )
+            return PAM_SUCCESS;
+        
         return PAM_PERM_DENIED;
     }
 

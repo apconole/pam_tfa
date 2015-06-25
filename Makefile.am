@@ -8,5 +8,4 @@ pam_tfa_la_LIBADD  = -lpam ${libcurl_LIBS} ${libssl_LIBS}
 pam_tfa_la_LDFLAGS = -module -avoid-version
 
 install-data-hook:
-	rm -f $(DESTDIR)$(pamlibdir)/pam_tfa.so;
-
+	rm -f $(DESTDIR)$(pamlibdir)/pam_tfa.la;
