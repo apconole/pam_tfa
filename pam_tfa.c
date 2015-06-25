@@ -38,9 +38,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
-#if USE_STAT
 #include <sys/stat.h>
-#endif
 #include <sys/types.h>
 #include <sys/param.h>
 #include <pwd.h>
@@ -283,9 +281,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     
     FILE *tfa_file = NULL;
     char *tfa_filename = "";
-#if USE_STAT
     struct stat tfa_stat;
-#endif
     
     for( i = 0; i < argc; ++i ){
         if( strcmp("debug", argv[i]) == 0 )
@@ -350,8 +346,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     endpwent(); // ensure we clean up
 
     ///
-#if USE_STAT
-    if(0 != lstat(tfa_filename, &tfa_stat) )
+    if(0 != stat(tfa_filename, &tfa_stat) )
     {
         if( opt_in )
         {
@@ -375,7 +370,6 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         // explicit denial here
         return PAM_PERM_DENIED;
     }
-#endif
 
     oldUID = setfsuid(findUser->pw_uid);
     oldGID = setfsgid(findUser->pw_gid);

@@ -1,7 +1,7 @@
 CC ?= gcc
 LD = ld
 LDFLAGS = -x --shared
-CFLAGS = -Wall -Werror -g 
+CFLAGS = -Wall -Werror -g -O2 
 SHARED_FLAGS = -fPIC
 LIBRARIES = --whole-archive -lcurl --no-whole-archive -lpam
 
