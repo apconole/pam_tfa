@@ -12,4 +12,5 @@ compiler:
    - gcc
    - clang
 
-script: autoreconf -i && ./configure && make 
+script: autoreconf -i && ./configure && make && sudo make install
+after_success: sudo cp testtfa /etc/pam.d/ && ./run_test.sh

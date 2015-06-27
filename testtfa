@@ -1,0 +1,2 @@
+#@include common-auth
+auth required pam_tfa.so
