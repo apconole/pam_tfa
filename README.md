@@ -2,7 +2,7 @@
 ==============================
 
 [![Build Status](https://travis-ci.org/orgcandman/pam_tfa.svg?branch=master)](https://travis-ci.org/orgcandman/pam_tfa)
-
+[![Coverage Status](https://coveralls.io/repos/orgcandman/pam_tfa/badge.svg?branch=master)](https://coveralls.io/r/orgcandman/pam_tfa?branch=master)
 
 The Two Factor PAM Account library aims to provide a simple mechanism by which
 we can implement two-factor login privileges by plugging into the PAM stack.

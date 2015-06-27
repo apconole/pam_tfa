@@ -18,6 +18,7 @@ script:
    - ./configure --enable-gcov
    - make
    - sudo make install
+   - ./testdlopen .libs/pam_tfa.so
    - sudo cp testtfa /etc/pam.d/
    - ./run_test.sh | tee results.xml
    - coveralls --gcov-options '\-lp'
