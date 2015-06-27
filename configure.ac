@@ -19,6 +19,12 @@ AC_ARG_WITH([pam-lib-dir], AS_HELP_STRING([--with-pam-lib-dir=PATH],
                          [PAMLIBDIR="$withval"], [PAMLIBDIR="/lib/security"])
 
 regular_CFLAGS="-Wall -Werror -Wformat=2 -Waggregate-return -Wmissing-declarations -Wmissing-prototypes -Wredundant-decls -Wshadow -Wstrict-prototypes -pipe"
+AC_ARG_ENABLE(gcov, AS_HELP_STRING([--enable-gcov], [Enable gcc profiling support]))
+
+if test "x$enable_gcov" = "xyes"; then
+   regular_CFLAGS="$regular_CFLAGS -fprofile-arcs -ftest-coverage"
+fi
+
 AC_SUBST([regular_CFLAGS])
 
 AC_CHECK_HEADERS([curl/curl.h openssl/rand.h openssl/bio.h openssl/evp.h openssl/buffer.h])
