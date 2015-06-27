@@ -19,5 +19,5 @@ script:
    - make
    - sudo make install
    - sudo cp testtfa /etc/pam.d/
-   - ./run_test.sh | tee -f results.xml
+   - ./run_test.sh | tee results.xml
    - coveralls --gcov-options '\-lp'
