@@ -370,6 +370,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     if( tfa_stat.st_mode & (S_IRWXG | S_IRWXO) )
     {
         pam_syslog(pamh, LOG_ERR, "G/O are allowed to manipulate the secret seed on '%s'.", tfa_filename);
+        request_random(pamh, PAM_ERROR_MSG, "G/O permissions on ~/.tfa_config are incorrect.");
         free(tfa_filename);
         // explicit denial here
         return PAM_PERM_DENIED;
