@@ -11,7 +11,6 @@ before_install:
 
 compiler:
    - gcc
-   - clang
 
 script: 
    - autoreconf -i 
