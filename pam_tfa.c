@@ -88,6 +88,21 @@ struct tfa_file_param_map
     {"fail", failPolicy, sizeof(failPolicy)}
 };
 
+//// Send the email
+char MailPayload[EMAIL_BUFSIZ] = {0};
+
+static void clearParams(void)
+{
+    size_t iparam;
+    for(iparam = 0; iparam < sizeof(file_params) / sizeof(file_params[0]); ++iparam)
+    {
+        memset(file_params[iparam].output_variable, 0,
+               file_params[iparam].length_of_output);
+    }
+
+    memset(MailPayload, 0, sizeof(MailPayload));
+}
+
 #if 0
 static int converse(pam_handle_t *pamh, int nargs,
                     const struct pam_message **message,
@@ -156,9 +171,6 @@ static char *base64_encode(const char *buffer, size_t length)
     BIO_free_all(bio);
     return b64txt;
 }
-
-//// Send the email
-char MailPayload[EMAIL_BUFSIZ] = {0};
 
 struct upload_status
 {
@@ -267,13 +279,110 @@ static int publish_email(pam_handle_t *pamh, const char *currentUser, const char
     return 0;
 }
 
+#ifdef ENABLE_OTP
+//// Google TOTP HMAC SHA1
+static void hmac_sha1(const unsigned char *secret, size_t secret_len,
+                      const unsigned char *input, size_t input_len,
+                      unsigned char *result, size_t result_size)
+{
+    SHA1_INFO context;
+    // The scope on this is required here, because we may assign secret to
+    // point to this if secret_len > 64
+    unsigned char tmp_internal_hash[64];
+
+    // temp length
+    int i;
+
+    if( secret_length > 64 )
+    {
+        sha1_init(&context);
+        sha1_update(&context, secret, secret_len);
+        sha1_final(&context, tmp_internal_hash);
+        secret_len = SHA1_DIGEST_LENGTH;
+    }
+    else
+    {
+        memcpy(tmp_internal_hash, secret, secret_len);
+    }
+
+    for(i = 0; i < secret_len; ++i)
+    {
+        tmp_internal_hash[i] ^= 0x36; 
+    }
+
+    memset(tmp_internal_hash + secret_len, 0x36, 64 - secret_len);
+}
+#endif
+
+// returns 0 on success, -1 on failure
+static int32_t getPwEntryByName(const char *username, struct passwd *pwbuf)
+{
+    struct passwd output_buf, *pw;
+    char *buf;
+#ifdef _SC_GETPW_R_SIZE_MAX
+    int len = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if( len <= 0 )
+        len = 16384; // indeterminate - 16k should be enough?
+#else
+    int len = 16384;
+#endif
+
+    buf = (char *)malloc(len);
+    if( !buf )
+    {
+        return -1;
+    }
+
+    if( getpwnam_r(username, &output_buf, buf, len, &pw) || !pw )
+    {
+        free( buf );
+        return -2;
+    }
+
+    pwbuf->pw_uid  = output_buf.pw_uid;
+    pwbuf->pw_gid  = output_buf.pw_gid;
+    pwbuf->pw_name = strdup(output_buf.pw_name);
+    
+    if( output_buf.pw_passwd )
+        pwbuf->pw_passwd = strdup(output_buf.pw_passwd);
+    else
+        pwbuf->pw_passwd = NULL;
+
+    pwbuf->pw_gecos = strdup(output_buf.pw_gecos);
+    pwbuf->pw_dir   = strdup(output_buf.pw_dir);
+    pwbuf->pw_shell = strdup(output_buf.pw_shell);
+
+    memset(buf, 0, len);
+    
+    free(buf);
+    return 0;
+}
+
+static void release_str( char *str )
+{
+    size_t lstr;
+    if( !str ) return;
+    lstr = strlen(str);
+    memset(str, 0, lstr);
+    free(str);
+}
+
+static void release_pwbuf_structs(struct passwd *pwbuf)
+{
+    release_str( pwbuf->pw_shell );
+    release_str( pwbuf->pw_dir );
+    release_str( pwbuf->pw_gecos );
+    release_str( pwbuf->pw_passwd );
+    release_str( pwbuf->pw_name );
+}
+
 //// the following is the main entrypoint
 
 PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                                 int argc, const char **argv)
 {
     int opt_in = 1, i;
-    struct passwd *findUser;
+    struct passwd pwbuf, *findUser = &pwbuf;
     const char *currentUser;
     uint32_t randBuf;
     char randBufAscii[16] = {0};
@@ -298,36 +407,21 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
        currentUser == NULL || strlen(currentUser) == 0)
     {
         pam_syslog(pamh, LOG_ERR, "Unable to determine target user.");
+        clearParams();
         return PAM_SYSTEM_ERR;
     }
 
     if(debug) pam_syslog(pamh, LOG_DEBUG, "TwoFactor for %s", currentUser);
+
+    // gett pwentry
     
-    // seek through the pw entries
-    setpwent(); // reset the pwentries
-    errno = 0;
-    findUser = getpwent();
-    if( debug ) pam_syslog(pamh, LOG_DEBUG, "check against %s", findUser->pw_name);
-    while( !errno && findUser && strcmp(findUser->pw_name, currentUser) )
+    if( getPwEntryByName(currentUser, findUser) != 0 )
     {
-        findUser = getpwent();
-        if( debug ) pam_syslog(pamh, LOG_DEBUG, "check against %s", findUser->pw_name);
-    }
-    
-    if( errno )
-    {
-        endpwent(); // cleanup here to avoid squelching errno
         if( debug )
         {
             pam_syslog(pamh, LOG_DEBUG, "Error while using getpwent");
         }
-        return PAM_SYSTEM_ERR;
-    }
-
-    if( !findUser )
-    {
-        pam_syslog(pamh, LOG_ERR, "Unable to find user id (%s) in the pwent database", currentUser);
-        endpwent();
+        clearParams();
         return PAM_SYSTEM_ERR;
     }
 
@@ -336,27 +430,27 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     if( !tfa_filename )
     {
         pam_syslog(pamh, LOG_ERR, "Unable to alloc memory");
-        endpwent();
+        clearParams();
         return PAM_SYSTEM_ERR;
     }
 
-    *tfa_filename = 0; // set first byte to nil for favorable str* interaction
+    *tfa_filename = 0; // set first byte to nil for favorable str* fn interaction
 
     // this should be okay, we used pw_dir to make the dest long
     // HOWEVER, we should probably figure out a 'safe' mechanism
     strcpy(tfa_filename, findUser->pw_dir);
     strcat(tfa_filename, TFA_CONFIG);
     
-    endpwent(); // ensure we clean up
-
     ///
     if(0 != stat(tfa_filename, &tfa_stat) )
     {
+        release_pwbuf_structs(findUser);
         if( opt_in )
         {
             pam_syslog(pamh, LOG_WARNING, "User '%s' not opted in for file '%s', allowing",
-                       findUser->pw_name, tfa_filename);
+                       currentUser, tfa_filename);
             free(tfa_filename);
+            clearParams();
             return PAM_SUCCESS;
         }
         
@@ -364,6 +458,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         // the root user would have set this up... still... shiver?
         pam_syslog(pamh, LOG_ERR, "Unable to stat '%s'", tfa_filename);
         free(tfa_filename);
+        clearParams();
         return PAM_SYSTEM_ERR;
     }
     
@@ -373,12 +468,15 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         request_random(pamh, PAM_ERROR_MSG, "G/O permissions on ~/.tfa_config are incorrect.");
         free(tfa_filename);
         // explicit denial here
+        clearParams();
         return PAM_PERM_DENIED;
     }
 
     oldUID = setfsuid(findUser->pw_uid);
     oldGID = setfsgid(findUser->pw_gid);
 
+    release_pwbuf_structs(findUser); // give it up!
+    
     tfa_file = fopen(tfa_filename, "r");
     if( tfa_file == NULL )
     {
@@ -386,7 +484,8 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         free(tfa_filename);
 
         setfsgid(oldGID); setfsuid(oldUID);
-        
+        clearParams();
+
         if( !opt_in )
             return PAM_PERM_DENIED; // if we can stat but can't open for reading
         // there is some kind of hack afoot - explicit deny
@@ -416,7 +515,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                            file_params[iparam].param_name);
                 fclose(tfa_file);
                 setfsgid(oldGID); setfsuid(oldUID);
-
+                clearParams();
                 return PAM_SYSTEM_ERR;
             }
             ++iws;
@@ -427,7 +526,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
                            file_params[iparam].param_name);
                 fclose(tfa_file);
                 setfsgid(oldGID); setfsuid(oldUID);
-
+                clearParams();
                 return PAM_SYSTEM_ERR;
             }
             strncpy(file_params[iparam].output_variable,
@@ -450,7 +549,8 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         }
     }
     fclose(tfa_file); // later
-
+    memset(line, 0, sizeof(line));
+    
     if( debug )
     {
         pam_syslog(pamh, LOG_DEBUG, "Email to: %s", emailToAddr);
@@ -466,7 +566,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         /// okay something bad happened. this is a case of really bail
         pam_syslog(pamh, LOG_ERR, "Unable to achieve randomness for authentication. Denying");
         setfsgid(oldGID); setfsuid(oldUID);
-
+        clearParams();
         return PAM_PERM_DENIED;
     }
 
@@ -478,13 +578,17 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     
     if( publish_email(pamh, currentUser, CHAP) < 0 )
     {
+        
         pam_syslog(pamh, LOG_ERR, "Unable to send email!!");
         free(CHAP);
         setfsgid(oldGID); setfsuid(oldUID);
 
         if( !strcmp(failPolicy, "pass") )
+        {
+            clearParams();
             return PAM_SUCCESS;
-        
+        }
+        clearParams();
         return PAM_PERM_DENIED;
     }
 
@@ -499,6 +603,7 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     free(CHAP);
     free(RESP);
     setfsgid(oldGID); setfsuid(oldUID);
+    clearParams();
 
     if( i )
     {
@@ -513,10 +618,4 @@ PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags,
                                    int argc, const char **argv)
 {
     return pam_sm_acct_mgmt(pamh, flags, argc, argv);
-}
-
-PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc,
-                              const char *argv[])
-{
-    return (PAM_SUCCESS);
 }

@@ -1,3 +1,4 @@
+ACLOCAL_AMFLAGS = -I m4
 AM_CFLAGS= ${regular_CFLAGS} ${libcurl_CFLAGS} ${libssl_CFLAGS}
 
 pamlibdir          = @PAMLIBDIR@
