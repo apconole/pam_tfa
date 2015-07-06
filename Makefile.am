@@ -5,7 +5,7 @@ pamlibdir          = @PAMLIBDIR@
 pamlib_LTLIBRARIES = pam_tfa.la
 pamlib_PROGRAMS = testpam testdlopen
 
-pam_tfa_la_SOURCES = pam_tfa.c
+pam_tfa_la_SOURCES = pam_tfa.c util.c
 pam_tfa_la_LIBADD  = -lpam ${libcurl_LIBS} ${libssl_LIBS}
 pam_tfa_la_LDFLAGS = -module -avoid-version
 

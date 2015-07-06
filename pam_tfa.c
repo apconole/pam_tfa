@@ -50,11 +50,6 @@
 
 #include <curl/curl.h>
 
-#include <openssl/rand.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/buffer.h>
-
 #define TFA_CONFIG "/.tfa_config"
 #define EMAIL_BUFSIZ 2048
 #define PAM_SM_AUTH
@@ -66,6 +61,7 @@
 #include <security/pam_ext.h>
 #include <security/pam_misc.h>
 
+#include "util.h"
 
 //// global per-instance
 char emailToAddr[256], emailFromAddr[256], emailServer[256],
@@ -103,21 +99,6 @@ static void clearParams(void)
     memset(MailPayload, 0, sizeof(MailPayload));
 }
 
-#if 0
-static int converse(pam_handle_t *pamh, int nargs,
-                    const struct pam_message **message,
-                    struct pam_response **response)
-{
-    struct pam_conv *conv;
-    int retval = pam_get_item(pamh, PAM_CONV, (void *)&conv);
-    if( retval != PAM_SUCCESS )
-    {
-        pam_syslog(pamh, LOG_ERR, "Unable to get CONV");
-        return retval;
-    }
-    return conv->conv(nargs, message, response, conv->appdata_ptr);
-}
-#endif
 
 static char *request_random(pam_handle_t *pamh, int echocode, const char *prompt)
 {
@@ -142,35 +123,6 @@ static char *request_random(pam_handle_t *pamh, int echocode, const char *prompt
 
 //// Base64 routines
 
-/**
- * @brief encodes a buffer, and places the result as a string (which must be
- * freed)
- *
- * @param buffer [in] Input string to encode
- * @param length [in] Length of the input string
- * @return String which is the base 64 encoded string.
- */
-static char *base64_encode(const char *buffer, size_t length)
-{
-    char *b64txt;
-    BIO *bio, *b64;
-    BUF_MEM *bufferPtr;
-
-    b64 = BIO_new(BIO_f_base64());
-    bio = BIO_new(BIO_s_mem());
-
-    bio = BIO_push(b64, bio);
-    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
-    BIO_write(bio, buffer, length);
-    (void)BIO_flush(bio);
-    BIO_get_mem_ptr(bio, &bufferPtr);
-    
-    b64txt = strdup((*bufferPtr).data);
-    
-    (void)BIO_set_close(bio, BIO_CLOSE);
-    BIO_free_all(bio);
-    return b64txt;
-}
 
 struct upload_status
 {
@@ -314,59 +266,6 @@ static void hmac_sha1(const unsigned char *secret, size_t secret_len,
 }
 #endif
 
-// returns 0 on success, -1 on failure
-static int32_t getPwEntryByName(const char *username, struct passwd *pwbuf)
-{
-    struct passwd output_buf, *pw;
-    char *buf;
-#ifdef _SC_GETPW_R_SIZE_MAX
-    int len = sysconf(_SC_GETPW_R_SIZE_MAX);
-    if( len <= 0 )
-        len = 16384; // indeterminate - 16k should be enough?
-#else
-    int len = 16384;
-#endif
-
-    buf = (char *)malloc(len);
-    if( !buf )
-    {
-        return -1;
-    }
-
-    if( getpwnam_r(username, &output_buf, buf, len, &pw) || !pw )
-    {
-        free( buf );
-        return -2;
-    }
-
-    pwbuf->pw_uid  = output_buf.pw_uid;
-    pwbuf->pw_gid  = output_buf.pw_gid;
-    pwbuf->pw_name = strdup(output_buf.pw_name);
-    
-    if( output_buf.pw_passwd )
-        pwbuf->pw_passwd = strdup(output_buf.pw_passwd);
-    else
-        pwbuf->pw_passwd = NULL;
-
-    pwbuf->pw_gecos = strdup(output_buf.pw_gecos);
-    pwbuf->pw_dir   = strdup(output_buf.pw_dir);
-    pwbuf->pw_shell = strdup(output_buf.pw_shell);
-
-    memset(buf, 0, len);
-    
-    free(buf);
-    return 0;
-}
-
-static void release_str( char *str )
-{
-    size_t lstr;
-    if( !str ) return;
-    lstr = strlen(str);
-    memset(str, 0, lstr);
-    free(str);
-}
-
 static void release_pwbuf_structs(struct passwd *pwbuf)
 {
     release_str( pwbuf->pw_shell );
@@ -384,7 +283,6 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
     int opt_in = 1, i;
     struct passwd pwbuf, *findUser = &pwbuf;
     const char *currentUser;
-    uint32_t randBuf;
     char randBufAscii[16] = {0};
     uid_t oldUID;
     gid_t oldGID;
@@ -560,21 +458,11 @@ PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags,
         pam_syslog(pamh, LOG_DEBUG, "Email username: %s", emailUser);
     }
 
-    // get the random data
-    if( !RAND_bytes((unsigned char *)&randBuf, 4) )
-    {
-        /// okay something bad happened. this is a case of really bail
-        pam_syslog(pamh, LOG_ERR, "Unable to achieve randomness for authentication. Denying");
-        setfsgid(oldGID); setfsuid(oldUID);
-        clearParams();
-        return PAM_PERM_DENIED;
-    }
-
-    snprintf(randBufAscii, sizeof(randBufAscii), "%08x", randBuf);
+    // get the random data as acii
+    snprintf(randBufAscii, sizeof(randBufAscii), "%08x", getRandomInt32(pamh));
 
     CHAP = base64_encode(randBufAscii, strlen(randBufAscii));
     *(CHAP+8) = 0;
-    //fputs("Sending challenge mail to configured recipient.\n", stdout);
     
     if( publish_email(pamh, currentUser, CHAP) < 0 )
     {
