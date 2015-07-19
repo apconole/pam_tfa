@@ -20,4 +20,3 @@ script:
    - ./testdlopen .libs/pam_tfa.so
    - sudo cp testtfa /etc/pam.d/
    - ./run_test.sh | tee results.xml
-   - test "X$TRAVIS_JENKINS_RESULT" == "X" && coveralls --gcov-options '\-lp'
