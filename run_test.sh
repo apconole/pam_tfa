@@ -9,21 +9,33 @@ report(){
     # xunit xml
     echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone='yes'?>"
     echo "<TestRun>"
-    echo "  <FailedTests>"
     OLDIFS=$IFS; IFS=','
-    for FAILURE in "${FAILED[@]}"; do
-        set $FAILURE
-        echo "    <FailedTest id=\"$2\"><Name>$1</Name><FailureType>Assertion</FailureType><Message>assertion failed - Expected $3 but got $4</FailedTest>"
-    done
-    echo "  </FailedTests>"
+    if [ ${#FAILED[@]} -ne 0 ]; then
+        echo "  <FailedTests>"
+        for FAILURE in "${FAILED[@]}"; do
+            set $FAILURE
+            echo "    <FailedTest id=\"$2\"><Name>$1</Name><FailureType>Assertion</FailureType><Message>assertion failed - Expected $3 but got $4</FailedTest>"
+        done
+        echo "  </FailedTests>"
+    else
+        echo "  <FailedTests/>"
+    fi
     echo "  <SuccessfulTests>"
     for SUCCESS in "${PASSED[@]}"; do
         set $SUCCESS
         echo "    <Test id=\"$2\"><Name>$1</Name></Test>"
     done
     echo "  </SuccessfulTests>"
-    IFS=$OLDIFS
+    echo "  <Statistics>"
+    NUMTESTS=("${PASSED[@]}" "${FAILED[@]}")
+    echo "     <Tests>${#NUMTESTS[@]}</Tests>"
+    echo "     <FailuresTotal>${#FAILED[@]}</FailuresTotal>"
+    echo "     <Errors>0</Errors>"
+    echo "     <Failures>${#FAILED[@]}</Failures>"
+    echo "  </Statistics>"
+
     echo "</TestRun>"
+    IFS=$OLDIFS
 }
 
 testAssertFailure(){
