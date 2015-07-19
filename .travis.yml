@@ -20,4 +20,4 @@ script:
    - ./testdlopen .libs/pam_tfa.so
    - sudo cp testtfa /etc/pam.d/
    - ./run_test.sh | tee results.xml
-   - if [ "X${NO_COVERALLS}" == "X" ]; then coveralls --gcov-options '\-lp'; fi
+   - test "X$NO_COVERALLS" = "X" && coveralls --gcov-options '\-lp'
